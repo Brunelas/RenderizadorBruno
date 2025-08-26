@@ -48,11 +48,17 @@ class GL:
         print("Polypoint2D : pontos = {0}".format(point)) # imprime no terminal pontos
         print("Polypoint2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 0])  # altera pixel (u, v, tipo, r, g, b)
-        # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
+        # Implementação simples: desenhar cada ponto
+        emissive_color = colors.get('emissiveColor', [1.0, 1.0, 1.0])
+        r = int(emissive_color[0] * 255)
+        g = int(emissive_color[1] * 255)
+        b = int(emissive_color[2] * 255)
+        
+        for i in range(0, len(point), 2):
+            x = int(point[i])
+            y = int(point[i + 1])
+            if 0 <= x < GL.width and 0 <= y < GL.height:
+                gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, [r, g, b])
         
     @staticmethod
     def polyline2D(lineSegments, colors):
@@ -71,11 +77,20 @@ class GL:
         print("Polyline2D : lineSegments = {0}".format(lineSegments)) # imprime no terminal
         print("Polyline2D : colors = {0}".format(colors)) # imprime no terminal as cores
         
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
-        # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
+        # Implementação simples: desenhar linhas conectando pontos consecutivos
+        emissive_color = colors.get('emissiveColor', [1.0, 1.0, 1.0])
+        r = int(emissive_color[0] * 255)
+        g = int(emissive_color[1] * 255)
+        b = int(emissive_color[2] * 255)
+        
+        for i in range(0, len(lineSegments) - 2, 2):
+            x0 = int(lineSegments[i])
+            y0 = int(lineSegments[i + 1])
+            x1 = int(lineSegments[i + 2])
+            y1 = int(lineSegments[i + 3])
+            
+            # Desenhar linha simples entre dois pontos
+            GL._draw_line_simple(x0, y0, x1, y1, [r, g, b])
 
     @staticmethod
     def circle2D(radius, colors):
@@ -110,8 +125,23 @@ class GL:
         print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
         print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        # Exemplo:
-        gpu.GPU.draw_pixel([6, 8], gpu.GPU.RGB8, [255, 255, 0])  # altera pixel (u, v, tipo, r, g, b)
+        # Implementação simples: desenhar triângulos preenchidos
+        emissive_color = colors.get('emissiveColor', [1.0, 1.0, 1.0])
+        r = int(emissive_color[0] * 255)
+        g = int(emissive_color[1] * 255)
+        b = int(emissive_color[2] * 255)
+        
+        for i in range(0, len(vertices), 6):
+            if i + 5 < len(vertices):
+                x1 = int(vertices[i])
+                y1 = int(vertices[i + 1])
+                x2 = int(vertices[i + 2])
+                y2 = int(vertices[i + 3])
+                x3 = int(vertices[i + 4])
+                y3 = int(vertices[i + 5])
+                
+                # Preencher triângulo simples
+                GL._fill_triangle_simple(x1, y1, x2, y2, x3, y3, [r, g, b])
 
 
     @staticmethod
@@ -479,3 +509,73 @@ class GL:
 
     def fragment_shader(self, shader):
         """Para no futuro implementar um fragment shader."""
+
+    # Funções auxiliares simples para rasterização
+    @staticmethod
+    def _draw_line_simple(x0, y0, x1, y1, color):
+        """Desenha uma linha simples entre dois pontos."""
+        # Algoritmo simples de linha
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        
+        if dx > dy:
+            # Linha mais horizontal
+            if x0 > x1:
+                x0, x1 = x1, x0
+                y0, y1 = y1, y0
+            
+            for x in range(x0, x1 + 1):
+                y = int(y0 + (y1 - y0) * (x - x0) / (x1 - x0))
+                if 0 <= x < GL.width and 0 <= y < GL.height:
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+        else:
+            # Linha mais vertical
+            if y0 > y1:
+                x0, x1 = x1, x0
+                y0, y1 = y1, y0
+            
+            for y in range(y0, y1 + 1):
+                x = int(x0 + (x1 - x0) * (y - y0) / (y1 - y0))
+                if 0 <= x < GL.width and 0 <= y < GL.height:
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
+
+    @staticmethod
+    def _fill_triangle_simple(x1, y1, x2, y2, x3, y3, color):
+        """Preenche um triângulo de forma simples."""
+        # Ordenar vértices por y (do menor para o maior)
+        vertices = [(x1, y1), (x2, y2), (x3, y3)]
+        vertices.sort(key=lambda v: v[1])
+        
+        x1, y1 = vertices[0]
+        x2, y2 = vertices[1]
+        x3, y3 = vertices[2]
+        
+        # Preencher triângulo usando algoritmo de scanline simples
+        for y in range(int(y1), int(y3) + 1):
+            if 0 <= y < GL.height:
+                # Calcular x inicial e final para esta linha y
+                if y <= y2:
+                    # Primeira parte do triângulo (y1 até y2)
+                    if y2 != y1:
+                        x_start = int(x1 + (x2 - x1) * (y - y1) / (y2 - y1))
+                        x_end = int(x1 + (x3 - x1) * (y - y1) / (y3 - y1))
+                    else:
+                        x_start = x1
+                        x_end = x1
+                else:
+                    # Segunda parte do triângulo (y2 até y3)
+                    if y3 != y2:
+                        x_start = int(x2 + (x3 - x2) * (y - y2) / (y3 - y2))
+                        x_end = int(x1 + (x3 - x1) * (y - y1) / (y3 - y1))
+                    else:
+                        x_start = x2
+                        x_end = x2
+                
+                # Ordenar x_start e x_end
+                if x_start > x_end:
+                    x_start, x_end = x_end, x_start
+                
+                # Desenhar linha horizontal preenchendo o triângulo
+                for x in range(x_start, x_end + 1):
+                    if 0 <= x < GL.width:
+                        gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, color)
