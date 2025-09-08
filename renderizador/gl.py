@@ -179,7 +179,7 @@ class GL:
         def ndc_to_screen(ndc_xy):
             x_ndc, y_ndc = ndc_xy[0], ndc_xy[1]
             x = (x_ndc + 1.0) * 0.5 * (w - 1)
-            y = ((y_ndc + 1.0) * 0.5) * (h - 1)  # origem (0,0) no topo
+            y = (1 - (y_ndc + 1.0) * 0.5) * (h - 1)  # origem (0,0) no topo
             return int(round(x)), int(round(y))
 
         for i in range(0, len(point), 9):
