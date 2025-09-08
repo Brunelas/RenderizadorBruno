@@ -161,12 +161,56 @@ class GL:
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleSet : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("TriangleSet : colors = {0}".format(colors)) # imprime no terminal as cores
+        if not point or len(point) < 9:
+            return
+
+        # cor emissiva (X3D em 0..1 → framebuffer 0..255)
+        rgb = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
+        col = [int(max(0, min(255, round(c*255)))) for c in rgb]
+
+        # garante matrizes padrão caso ainda não tenham sido definidas
+        M = getattr(GL, "_M", np.eye(4, dtype=float))
+        V = getattr(GL, "_V", np.eye(4, dtype=float))
+        P = getattr(GL, "_P", np.eye(4, dtype=float))
+        PVM = P @ V @ M
+
+        w, h = GL.width, GL.height
+
+        def ndc_to_screen(ndc_xy):
+            x_ndc, y_ndc = ndc_xy[0], ndc_xy[1]
+            x = (x_ndc + 1.0) * 0.5 * (w - 1)
+            y = ((y_ndc + 1.0) * 0.5) * (h - 1)  # origem (0,0) no topo
+            return int(round(x)), int(round(y))
+
+        for i in range(0, len(point), 9):
+            if i + 8 >= len(point):  # segurança
+                break
+
+            v0 = np.array([point[i],   point[i+1], point[i+2], 1.0], dtype=float)
+            v1 = np.array([point[i+3], point[i+4], point[i+5], 1.0], dtype=float)
+            v2 = np.array([point[i+6], point[i+7], point[i+8], 1.0], dtype=float)
+
+            c0 = PVM @ v0
+            c1 = PVM @ v1
+            c2 = PVM @ v2
+
+            # divisão por w -> NDC
+            if c0[3] == 0 or c1[3] == 0 or c2[3] == 0:
+                continue
+            ndc0 = c0[:3] / c0[3]
+            ndc1 = c1[:3] / c1[3]
+            ndc2 = c2[:3] / c2[3]
+
+            # mapeia para tela
+            x0, y0 = ndc_to_screen(ndc0)
+            x1, y1 = ndc_to_screen(ndc1)
+            x2, y2 = ndc_to_screen(ndc2)
+
+            # preenche o triângulo usando seu raster simples
+            GL._fill_triangle_simple(x0, y0, x1, y1, x2, y2, col)
 
         # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        # gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -175,12 +219,59 @@ class GL:
         # câmera virtual. Use esses dados para poder calcular e criar a matriz de projeção
         # perspectiva para poder aplicar nos pontos dos objetos geométricos.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Viewpoint : ", end='')
-        print("position = {0} ".format(position), end='')
-        print("orientation = {0} ".format(orientation), end='')
-        print("fieldOfView = {0} ".format(fieldOfView))
+        def T(tx, ty, tz):
+            M = np.eye(4, dtype=float)
+            M[:3, 3] = [tx, ty, tz]
+            return M
 
+        def R_axis_angle(x, y, z, angle):
+            v = np.array([x, y, z], dtype=float)
+            n = np.linalg.norm(v)
+            if n == 0.0:
+                return np.eye(4, dtype=float)
+            x, y, z = v / n
+            c, s, C = math.cos(angle), math.sin(angle), 1.0 - math.cos(angle)
+            R3 = np.array([
+                [x*x*C + c,   x*y*C - z*s, x*z*C + y*s],
+                [y*x*C + z*s, y*y*C + c,   y*z*C - x*s],
+                [z*x*C - y*s, z*y*C + x*s, z*z*C + c  ]
+            ], dtype=float)
+            R = np.eye(4, dtype=float)
+            R[:3, :3] = R3
+            return R
+        # ----------------------
+
+        px, py, pz = (position if position else [0.0, 0.0, 10.0])
+        if orientation and len(orientation) == 4:
+            ox, oy, oz, ang = orientation
+        else:
+            ox, oy, oz, ang = 0.0, 1.0, 0.0, 0.0
+
+        # inverso da rotação = rotacionar por -ang no mesmo eixo
+        R_inv = R_axis_angle(ox, oy, oz, -ang)
+        T_inv = T(-px, -py, -pz)
+
+        # View matrix (leva mundo -> câmera)
+        V = R_inv @ T_inv
+        setattr(GL, "_V", V)
+
+        # Projeção perspectiva a partir do FOV vertical
+        width, height = GL.width, GL.height
+        aspect = width / max(1, height)
+        fovy = float(fieldOfView) if fieldOfView else math.radians(60.0)
+        f = 1.0 / math.tan(fovy * 0.5)
+
+        z_near = GL.near
+        z_far  = GL.far
+
+        P = np.array([
+            [f/aspect, 0,  0,                                0],
+            [0,        f,  0,                                0],
+            [0,        0,  (z_far+z_near)/(z_near-z_far),   (2*z_far*z_near)/(z_near-z_far)],
+            [0,        0, -1,                                0]
+        ], dtype=float)
+
+        setattr(GL, "_P", P)
     @staticmethod
     def transform_in(translation, scale, rotation):
         """Função usada para renderizar (na verdade coletar os dados) de Transform."""
@@ -194,15 +285,43 @@ class GL:
         # Quando começar a usar Transforms dentre de outros Transforms, mais a frente no curso
         # Você precisará usar alguma estrutura de dados pilha para organizar as matrizes.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Transform : ", end='')
-        if translation:
-            print("translation = {0} ".format(translation), end='') # imprime no terminal
-        if scale:
-            print("scale = {0} ".format(scale), end='') # imprime no terminal
-        if rotation:
-            print("rotation = {0} ".format(rotation), end='') # imprime no terminal
-        print("")
+        def T(tx, ty, tz):
+            M = np.eye(4, dtype=float)
+            M[:3, 3] = [tx, ty, tz]
+            return M
+
+        def S(sx, sy, sz):
+            return np.diag([sx, sy, sz, 1.0]).astype(float)
+
+        def R_axis_angle(x, y, z, angle):
+            v = np.array([x, y, z], dtype=float)
+            n = np.linalg.norm(v)
+            if n == 0.0:
+                return np.eye(4, dtype=float)
+            x, y, z = v / n
+            c, s, C = math.cos(angle), math.sin(angle), 1.0 - math.cos(angle)
+            R3 = np.array([
+                [x*x*C + c,   x*y*C - z*s, x*z*C + y*s],
+                [y*x*C + z*s, y*y*C + c,   y*z*C - x*s],
+                [z*x*C - y*s, z*y*C + x*s, z*z*C + c  ]
+            ], dtype=float)
+            R = np.eye(4, dtype=float)
+            R[:3, :3] = R3
+            return R
+        # -------------------------------------------------------
+
+        tx, ty, tz = (translation if translation else [0.0, 0.0, 0.0])
+        sx, sy, sz = (scale       if scale       else [1.0, 1.0, 1.0])
+
+        if rotation and len(rotation) == 4:
+            rx, ry, rz, ang = rotation
+        else:
+            rx, ry, rz, ang = 0.0, 0.0, 1.0, 0.0
+
+        M = T(tx, ty, tz) @ R_axis_angle(rx, ry, rz, ang) @ S(sx, sy, sz)
+
+        # guarda em GL._M (cria se ainda não existe)
+        setattr(GL, "_M", M)
 
     @staticmethod
     def transform_out():
