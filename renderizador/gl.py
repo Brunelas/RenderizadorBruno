@@ -308,20 +308,26 @@ class GL:
             R = np.eye(4, dtype=float)
             R[:3, :3] = R3
             return R
-        # -------------------------------------------------------
+        # -----------------------------
 
         tx, ty, tz = (translation if translation else [0.0, 0.0, 0.0])
         sx, sy, sz = (scale       if scale       else [1.0, 1.0, 1.0])
-
         if rotation and len(rotation) == 4:
             rx, ry, rz, ang = rotation
         else:
             rx, ry, rz, ang = 0.0, 0.0, 1.0, 0.0
 
-        M = T(tx, ty, tz) @ R_axis_angle(rx, ry, rz, ang) @ S(sx, sy, sz)
+        local = T(tx, ty, tz) @ R_axis_angle(rx, ry, rz, ang) @ S(sx, sy, sz)
 
-        # guarda em GL._M (cria se ainda não existe)
-        setattr(GL, "_M", M)
+        # inicializa pilha e M atual se ainda não existirem
+        if not hasattr(GL, "_M"):
+            setattr(GL, "_M", np.eye(4, dtype=float))
+        if not hasattr(GL, "_M_stack"):
+            setattr(GL, "_M_stack", [])
+
+        # empilha M corrente e compõe com a transformação local
+        GL._M_stack.append(GL._M.copy())
+        GL._M = GL._M @ local  # compõe para Transform dentro de Transform
 
     @staticmethod
     def transform_out():
@@ -331,8 +337,12 @@ class GL:
         # deverá recuperar a matriz de transformação dos modelos do mundo da estrutura de
         # pilha implementada.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Saindo de Transform")
+        # restaura a matriz do topo da pilha
+        if hasattr(GL, "_M_stack") and len(GL._M_stack) > 0:
+            GL._M = GL._M_stack.pop()
+        else:
+            # se algo sair do esperado, volta para identidade
+            GL._M = np.eye(4, dtype=float)
 
     @staticmethod
     def triangleStripSet(point, stripCount, colors):
@@ -349,15 +359,49 @@ class GL:
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleStripSet : pontos = {0} ".format(point), end='')
-        for i, strip in enumerate(stripCount):
-            print("strip[{0}] = {1} ".format(i, strip), end='')
-        print("")
-        print("TriangleStripSet : colors = {0}".format(colors)) # imprime no terminal as cores
+        # Cor emissiva como cor sólida do strip
+        rgb = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
+        solid = [int(max(0, min(255, round(c*255)))) for c in rgb]
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        # Helpers locais
+        w, h = GL.width, GL.height
+        M = getattr(GL, "_M", np.eye(4))
+        V = getattr(GL, "_V", np.eye(4))
+        P = getattr(GL, "_P", np.eye(4))
+        PVM = P @ V @ M
+
+        def to_screen(v3):
+            v = np.array([v3[0], v3[1], v3[2], 1.0], dtype=float)
+            clip = PVM @ v
+            if clip[3] == 0: 
+                return None
+            ndc = clip[:3] / clip[3]
+            x = (ndc[0] + 1.0) * 0.5 * (w - 1)
+            y = (1.0 - (ndc[1] + 1.0) * 0.5) * (h - 1)  # origem no topo
+            return int(round(x)), int(round(y))
+
+        def draw_tri(i0, i1, i2):
+            v0 = point[3*i0:3*i0+3]
+            v1 = point[3*i1:3*i1+3]
+            v2 = point[3*i2:3*i2+3]
+            p0 = to_screen(v0); p1 = to_screen(v1); p2 = to_screen(v2)
+            if p0 and p1 and p2:
+                GL._fill_triangle_simple(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], solid)
+
+        # Varre as tiras
+        base = 0
+        for count in stripCount:
+            # vértices da tira: base .. base+count-1
+            for k in range(count - 2):
+                i0 = base + k
+                i1 = base + k + 1
+                i2 = base + k + 2
+                # alterna orientação para manter winding consistente
+                if k % 2 == 0:
+                    draw_tri(i0, i1, i2)
+                else:
+                    draw_tri(i1, i0, i2)
+            base += count
 
     @staticmethod
     def indexedTriangleStripSet(point, index, colors):
@@ -375,12 +419,47 @@ class GL:
         # depois 2, 3 e 4, e assim por diante. Cuidado com a orientação dos vértices, ou seja,
         # todos no sentido horário ou todos no sentido anti-horário, conforme especificado.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedTriangleStripSet : pontos = {0}, index = {1}".format(point, index))
-        print("IndexedTriangleStripSet : colors = {0}".format(colors)) # imprime as cores
+        # Cor sólida
+        rgb = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
+        solid = [int(max(0, min(255, round(c*255)))) for c in rgb]
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        # Helpers
+        w, h = GL.width, GL.height
+        M = getattr(GL, "_M", np.eye(4))
+        V = getattr(GL, "_V", np.eye(4))
+        P = getattr(GL, "_P", np.eye(4))
+        PVM = P @ V @ M
+
+        def to_screen_by_idx(ii):
+            v3 = point[3*ii:3*ii+3]
+            v = np.array([v3[0], v3[1], v3[2], 1.0], dtype=float)
+            clip = PVM @ v
+            if clip[3] == 0:
+                return None
+            ndc = clip[:3] / clip[3]
+            x = (ndc[0] + 1.0) * 0.5 * (w - 1)
+            y = (1.0 - (ndc[1] + 1.0) * 0.5) * (h - 1)
+            return int(round(x)), int(round(y))
+
+        def draw_tri(i0, i1, i2):
+            p0 = to_screen_by_idx(i0); p1 = to_screen_by_idx(i1); p2 = to_screen_by_idx(i2)
+            if p0 and p1 and p2:
+                GL._fill_triangle_simple(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], solid)
+
+        # Processa blocos separados por -1
+        strip = []
+        for idx in index + [-1]:
+            if idx == -1:
+                if len(strip) >= 3:
+                    for k in range(len(strip) - 2):
+                        i0, i1, i2 = strip[k], strip[k+1], strip[k+2]
+                        if k % 2 == 0:
+                            draw_tri(i0, i1, i2)
+                        else:
+                            draw_tri(i1, i0, i2)
+                strip = []
+            else:
+                strip.append(idx)
 
     @staticmethod
     def indexedFaceSet(coord, coordIndex, colorPerVertex, color, colorIndex,
@@ -422,8 +501,88 @@ class GL:
             print("\t Dimensões da image = {0}".format(image.shape))
         print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+        # ---------- Helpers de pipeline ----------
+        w, h = GL.width, GL.height
+        M = getattr(GL, "_M", np.eye(4))
+        V = getattr(GL, "_V", np.eye(4))
+        P = getattr(GL, "_P", np.eye(4))
+        PVM = P @ V @ M
+
+        def to_screen_idx(ii):
+            v3 = coord[3*ii:3*ii+3]
+            v = np.array([v3[0], v3[1], v3[2], 1.0], dtype=float)
+            clip = PVM @ v
+            if clip[3] == 0:
+                return None, None
+            ndc = clip[:3] / clip[3]
+            x = (ndc[0] + 1.0) * 0.5 * (w - 1)
+            y = (1.0 - (ndc[1] + 1.0) * 0.5) * (h - 1)
+            return (int(round(x)), int(round(y))), ndc[2]  # z_ndc, se precisar no futuro
+
+        # Raster sólido (uma cor)
+        em = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
+        solid = [int(max(0, min(255, round(c*255)))) for c in em]
+
+        # Raster com cor por vértice (baricêntricas simples)
+        def fill_triangle_color(p0, p1, p2, c0, c1, c2):
+            minx = max(0, min(p0[0], p1[0], p2[0]))
+            maxx = min(w-1, max(p0[0], p1[0], p2[0]))
+            miny = max(0, min(p0[1], p1[1], p2[1]))
+            maxy = min(h-1, max(p0[1], p1[1], p2[1]))
+
+            def edge(a, b, c):
+                return (c[0]-a[0])*(b[1]-a[1]) - (c[1]-a[1])*(b[0]-a[0])
+
+            area = edge(p0, p1, p2)
+            if area == 0:
+                return
+            for ypix in range(miny, maxy+1):
+                for xpix in range(minx, maxx+1):
+                    P = (xpix + 0.5, ypix + 0.5)
+                    w0 = edge(p1, p2, P)
+                    w1 = edge(p2, p0, P)
+                    w2 = edge(p0, p1, P)
+                    if (area > 0 and w0 >= 0 and w1 >= 0 and w2 >= 0) or \
+                       (area < 0 and w0 <= 0 and w1 <= 0 and w2 <= 0):
+                        a0 = w0/area; a1 = w1/area; a2 = w2/area
+                        r = int(max(0, min(255, round(a0*c0[0] + a1*c1[0] + a2*c2[0]))))
+                        g = int(max(0, min(255, round(a0*c0[1] + a1*c1[1] + a2*c2[1]))))
+                        b = int(max(0, min(255, round(a0*c0[2] + a1*c1[2] + a2*c2[2]))))
+                        gpu.GPU.draw_pixel([xpix, ypix], gpu.GPU.RGB8, [r, g, b])
+
+        # ---------- Triangulação em fan ----------
+        face = []
+        for idx in coordIndex + [-1]:
+            if idx == -1:
+                if len(face) >= 3:
+                    v0 = face[0]
+                    for j in range(1, len(face)-1):
+                        v1, v2 = face[j], face[j+1]
+                        p0, _ = to_screen_idx(v0)
+                        p1, _ = to_screen_idx(v1)
+                        p2, _ = to_screen_idx(v2)
+                        if not (p0 and p1 and p2):
+                            continue
+
+                        if colorPerVertex and color and colorIndex:
+                            # pega cor por vértice (em 0..1 → 0..255)
+                            def col_of_vertex(ci):
+                                # usa o índice correspondente; se faltar, usa emissive
+                                if ci < len(colorIndex) and colorIndex[ci] >= 0:
+                                    k = colorIndex[ci]*3
+                                    rgb = [color[k]*255, color[k+1]*255, color[k+2]*255]
+                                    return [int(max(0,min(255,round(v)))) for v in rgb]
+                                return solid
+                            c0 = col_of_vertex(v0)
+                            c1 = col_of_vertex(v1)
+                            c2 = col_of_vertex(v2)
+                            fill_triangle_color(p0, p1, p2, c0, c1, c2)
+                        else:
+                            # cor sólida
+                            GL._fill_triangle_simple(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], solid)
+                face = []
+            else:
+                face.append(idx)
 
     @staticmethod
     def box(size, colors):
