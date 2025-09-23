@@ -161,53 +161,77 @@ class GL:
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
 
+        # if not point or len(point) < 9:
+        #     return
+
+        # # cor emissiva (X3D em 0..1 → framebuffer 0..255)
+        # rgb = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
+        # col = [int(max(0, min(255, round(c*255)))) for c in rgb]
+
+        # # garante matrizes padrão caso ainda não tenham sido definidas
+        # M = getattr(GL, "_M", np.eye(4, dtype=float))
+        # V = getattr(GL, "_V", np.eye(4, dtype=float))
+        # P = getattr(GL, "_P", np.eye(4, dtype=float))
+        # PVM = P @ V @ M
+
+        # w, h = GL.width, GL.height
+
+        # def ndc_to_screen(ndc_xy):
+        #     x_ndc, y_ndc = ndc_xy[0], ndc_xy[1]
+        #     x = (x_ndc + 1.0) * 0.5 * (w - 1)
+        #     y = (1 - (y_ndc + 1.0) * 0.5) * (h - 1)  # origem (0,0) no topo
+        #     return int(round(x)), int(round(y))
+
+        # for i in range(0, len(point), 9):
+        #     if i + 8 >= len(point):  # segurança
+        #         break
+
+        #     v0 = np.array([point[i],   point[i+1], point[i+2], 1.0], dtype=float)
+        #     v1 = np.array([point[i+3], point[i+4], point[i+5], 1.0], dtype=float)
+        #     v2 = np.array([point[i+6], point[i+7], point[i+8], 1.0], dtype=float)
+
+        #     c0 = PVM @ v0
+        #     c1 = PVM @ v1
+        #     c2 = PVM @ v2
+
+        #     # divisão por w -> NDC
+        #     if c0[3] == 0 or c1[3] == 0 or c2[3] == 0:
+        #         continue
+        #     ndc0 = c0[:3] / c0[3]
+        #     ndc1 = c1[:3] / c1[3]
+        #     ndc2 = c2[:3] / c2[3]
+
+        #     # mapeia para tela
+        #     x0, y0 = ndc_to_screen(ndc0)
+        #     x1, y1 = ndc_to_screen(ndc1)
+        #     x2, y2 = ndc_to_screen(ndc2)
+
+        #     # preenche o triângulo usando seu raster simples
+        #     GL._fill_triangle_simple(x0, y0, x1, y1, x2, y2, col)
+
         if not point or len(point) < 9:
             return
 
-        # cor emissiva (X3D em 0..1 → framebuffer 0..255)
-        rgb = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
-        col = [int(max(0, min(255, round(c*255)))) for c in rgb]
-
-        # garante matrizes padrão caso ainda não tenham sido definidas
-        M = getattr(GL, "_M", np.eye(4, dtype=float))
-        V = getattr(GL, "_V", np.eye(4, dtype=float))
-        P = getattr(GL, "_P", np.eye(4, dtype=float))
-        PVM = P @ V @ M
-
-        w, h = GL.width, GL.height
-
-        def ndc_to_screen(ndc_xy):
-            x_ndc, y_ndc = ndc_xy[0], ndc_xy[1]
-            x = (x_ndc + 1.0) * 0.5 * (w - 1)
-            y = (1 - (y_ndc + 1.0) * 0.5) * (h - 1)  # origem (0,0) no topo
-            return int(round(x)), int(round(y))
+        material = colors if isinstance(colors, dict) else {}
 
         for i in range(0, len(point), 9):
-            if i + 8 >= len(point):  # segurança
+            if i + 8 >= len(point):
                 break
+            v0 = [point[i],   point[i+1], point[i+2]]
+            v1 = [point[i+3], point[i+4], point[i+5]]
+            v2 = [point[i+6], point[i+7], point[i+8]]
 
-            v0 = np.array([point[i],   point[i+1], point[i+2], 1.0], dtype=float)
-            v1 = np.array([point[i+3], point[i+4], point[i+5], 1.0], dtype=float)
-            v2 = np.array([point[i+6], point[i+7], point[i+8], 1.0], dtype=float)
-
-            c0 = PVM @ v0
-            c1 = PVM @ v1
-            c2 = PVM @ v2
-
-            # divisão por w -> NDC
-            if c0[3] == 0 or c1[3] == 0 or c2[3] == 0:
+            p0 = GL._project_vertex(v0)
+            p1 = GL._project_vertex(v1)
+            p2 = GL._project_vertex(v2)
+            if p0 is None or p1 is None or p2 is None:
                 continue
-            ndc0 = c0[:3] / c0[3]
-            ndc1 = c1[:3] / c1[3]
-            ndc2 = c2[:3] / c2[3]
 
-            # mapeia para tela
-            x0, y0 = ndc_to_screen(ndc0)
-            x1, y1 = ndc_to_screen(ndc1)
-            x2, y2 = ndc_to_screen(ndc2)
+            a0 = {"rgb": None, "uv": None}
+            a1 = {"rgb": None, "uv": None}
+            a2 = {"rgb": None, "uv": None}
 
-            # preenche o triângulo usando seu raster simples
-            GL._fill_triangle_simple(x0, y0, x1, y1, x2, y2, col)
+            GL._raster_triangle_persp(p0, p1, p2, a0, a1, a2, material, tex=None, tri_uv_area=None)
 
         # Exemplo de desenho de um pixel branco na coordenada 10, 10
         # gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
@@ -488,102 +512,262 @@ class GL:
         # implementadado um método para a leitura de imagens.
 
         # Os prints abaixo são só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("IndexedFaceSet : ")
-        if coord:
-            print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
-        print("colorPerVertex = {0}".format(colorPerVertex))
-        if colorPerVertex and color and colorIndex:
-            print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
-        if texCoord and texCoordIndex:
-            print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
-        if current_texture:
-            image = gpu.GPU.load_texture(current_texture[0])
-            print("\t Matriz com image = {0}".format(image))
-            print("\t Dimensões da image = {0}".format(image.shape))
-        print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
+        # print("IndexedFaceSet : ")
+        # if coord:
+        #     print("\tpontos(x, y, z) = {0}, coordIndex = {1}".format(coord, coordIndex))
+        # print("colorPerVertex = {0}".format(colorPerVertex))
+        # if colorPerVertex and color and colorIndex:
+        #     print("\tcores(r, g, b) = {0}, colorIndex = {1}".format(color, colorIndex))
+        # if texCoord and texCoordIndex:
+        #     print("\tpontos(u, v) = {0}, texCoordIndex = {1}".format(texCoord, texCoordIndex))
+        # if current_texture:
+        #     image = gpu.GPU.load_texture(current_texture[0])
+        #     print("\t Matriz com image = {0}".format(image))
+        #     print("\t Dimensões da image = {0}".format(image.shape))
+        # print("IndexedFaceSet : colors = {0}".format(colors))  # imprime no terminal as cores
 
-        # ---------- Helpers de pipeline ----------
+        # # ---------- Helpers de pipeline ----------
+    
         w, h = GL.width, GL.height
         M = getattr(GL, "_M", np.eye(4))
         V = getattr(GL, "_V", np.eye(4))
         P = getattr(GL, "_P", np.eye(4))
         PVM = P @ V @ M
 
-        def to_screen_idx(ii):
+        # z-buffer de software (NDC: -1..1; mais perto = menor valor)
+        if not hasattr(GL, "_zbuf") or GL._zbuf.shape != (h, w):
+            GL._zbuf = np.full((h, w), 1.0, dtype=float)  # 1.0 = "longe"
+
+        # carrega textura (se houver)
+        img_tex = None
+        if current_texture and len(current_texture) > 0 and isinstance(current_texture[0], str):
+            img_tex = gpu.GPU.load_texture(current_texture[0])
+
+        # converte um índice de coordenada (em 'coord') para: screen(x,y), ndc_z, inv_w, clip_w
+        def proj_to_screen(ii):
             v3 = coord[3*ii:3*ii+3]
             v = np.array([v3[0], v3[1], v3[2], 1.0], dtype=float)
             clip = PVM @ v
-            if clip[3] == 0:
-                return None, None
-            ndc = clip[:3] / clip[3]
-            x = (ndc[0] + 1.0) * 0.5 * (w - 1)
-            y = (1.0 - (ndc[1] + 1.0) * 0.5) * (h - 1)
-            return (int(round(x)), int(round(y))), ndc[2]  # z_ndc, se precisar no futuro
+            w_clip = clip[3]
+            if w_clip == 0:
+                return None
+            inv_w = 1.0 / w_clip
+            ndc = clip[:3] * inv_w
+            x = int(round((ndc[0] + 1.0) * 0.5 * (w - 1)))
+            y = int(round((1.0 - (ndc[1] + 1.0) * 0.5) * (h - 1)))  # origem no topo
+            z_ndc = ndc[2]  # em [-1, 1]
+            return (x, y, z_ndc, inv_w)
 
-        # Raster sólido (uma cor)
-        em = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
-        solid = [int(max(0, min(255, round(c*255)))) for c in em]
+        # amostragem de textura (nearest), corrigindo o eixo V (imagem tem (0,0) no topo)
+        def sample_tex(u, v):
+            if img_tex is None:
+                return None
+            H, W = img_tex.shape[0], img_tex.shape[1]
+            # clamp
+            if u < 0: u = 0
+            if u > 1: u = 1
+            if v < 0: v = 0
+            if v > 1: v = 1
+            # X3D usa V=0 embaixo → imagem usa Y=0 em cima → flip em V:
+            uu = (1.0 - u) * (W - 1)
+            vv = v * (H - 1)
+            xi = int(round(uu))
+            yi = int(round(vv))
+            px = img_tex[yi, xi]
+            # textura pode ser RGB ou RGBA
+            if len(px) == 4:
+                return [int(px[0]), int(px[1]), int(px[2]), int(px[3])]
+            else:
+                return [int(px[0]), int(px[1]), int(px[2]), 255]
 
-        # Raster com cor por vértice (baricêntricas simples)
-        def fill_triangle_color(p0, p1, p2, c0, c1, c2):
-            minx = max(0, min(p0[0], p1[0], p2[0]))
-            maxx = min(w-1, max(p0[0], p1[0], p2[0]))
-            miny = max(0, min(p0[1], p1[1], p2[1]))
-            maxy = min(h-1, max(p0[1], p1[1], p2[1]))
+        # edge function
+        def edge(a, b, c):
+            return (c[0]-a[0])*(b[1]-a[1]) - (c[1]-a[1])*(b[0]-a[0])
 
-            def edge(a, b, c):
-                return (c[0]-a[0])*(b[1]-a[1]) - (c[1]-a[1])*(b[0]-a[0])
+        # rasterização com interpolação perspectiva (cor e UV) + z-buffer + transparência simples
+        def raster_tri(p0, p1, p2, col0, col1, col2, uv0, uv1, uv2):
+            # p* = (x, y, z_ndc, inv_w)
+            x0, y0, z0, iw0 = p0
+            x1, y1, z1, iw1 = p1
+            x2, y2, z2, iw2 = p2
 
-            area = edge(p0, p1, p2)
-            if area == 0:
+            # bounding box
+            minx = max(0, min(x0, x1, x2))
+            maxx = min(w-1, max(x0, x1, x2))
+            miny = max(0, min(y0, y1, y2))
+            maxy = min(h-1, max(y0, y1, y2))
+
+            A = edge((x0,y0), (x1,y1), (x2,y2))
+            if A == 0:
                 return
-            for ypix in range(miny, maxy+1):
-                for xpix in range(minx, maxx+1):
-                    P = (xpix + 0.5, ypix + 0.5)
-                    w0 = edge(p1, p2, P)
-                    w1 = edge(p2, p0, P)
-                    w2 = edge(p0, p1, P)
-                    if (area > 0 and w0 >= 0 and w1 >= 0 and w2 >= 0) or \
-                       (area < 0 and w0 <= 0 and w1 <= 0 and w2 <= 0):
-                        a0 = w0/area; a1 = w1/area; a2 = w2/area
-                        r = int(max(0, min(255, round(a0*c0[0] + a1*c1[0] + a2*c2[0]))))
-                        g = int(max(0, min(255, round(a0*c0[1] + a1*c1[1] + a2*c2[1]))))
-                        b = int(max(0, min(255, round(a0*c0[2] + a1*c1[2] + a2*c2[2]))))
-                        gpu.GPU.draw_pixel([xpix, ypix], gpu.GPU.RGB8, [r, g, b])
 
-        # ---------- Triangulação em fan ----------
+            # prepara atributos multiplicados por inv_w (perspective-correct)
+            has_color = (col0 is not None) and (col1 is not None) and (col2 is not None)
+            has_uv    = (uv0  is not None) and (uv1  is not None) and (uv2  is not None) and (img_tex is not None)
+
+            if has_color:
+                c0p = [col0[0]*iw0, col0[1]*iw0, col0[2]*iw0]
+                c1p = [col1[0]*iw1, col1[1]*iw1, col1[2]*iw1]
+                c2p = [col2[0]*iw2, col2[1]*iw2, col2[2]*iw2]
+            else:
+                # cor emissiva sólida
+                em = colors.get('emissiveColor', [1.0, 1.0, 1.0]) if isinstance(colors, dict) else [1.0, 1.0, 1.0]
+                base = [int(max(0, min(255, round(em[0]*255)))),
+                        int(max(0, min(255, round(em[1]*255)))),
+                        int(max(0, min(255, round(em[2]*255))))]
+
+            if has_uv:
+                u0p, v0p = uv0[0]*iw0, uv0[1]*iw0
+                u1p, v1p = uv1[0]*iw1, uv1[1]*iw1
+                u2p, v2p = uv2[0]*iw2, uv2[1]*iw2
+
+            # transparência do material (se houver) → alpha do material
+            mat_alpha = 1.0 - float(colors.get('transparency', 0.0)) if isinstance(colors, dict) else 1.0
+            if mat_alpha < 0: mat_alpha = 0.0
+            if mat_alpha > 1: mat_alpha = 1.0
+
+            for y in range(miny, maxy+1):
+                for x in range(minx, maxx+1):
+                    P = (x + 0.5, y + 0.5)
+                    w0 = edge((x1,y1), (x2,y2), P)
+                    w1 = edge((x2,y2), (x0,y0), P)
+                    w2 = edge((x0,y0), (x1,y1), P)
+
+                    if (A > 0 and w0 >= 0 and w1 >= 0 and w2 >= 0) or (A < 0 and w0 <= 0 and w1 <= 0 and w2 <= 0):
+                        # baricêntricas normalizadas
+                        w0n, w1n, w2n = w0/A, w1/A, w2/A
+
+                        # inv_w no pixel
+                        invw_pix = w0n*iw0 + w1n*iw1 + w2n*iw2
+                        if invw_pix == 0:
+                            continue
+
+                        # profundidade perspectiva-correct (usando z_ndc * inv_w)
+                        z_num = (w0n*z0*iw0 + w1n*z1*iw1 + w2n*z2*iw2)
+                        z_ndc_pix = z_num / invw_pix  # em [-1,1]
+                        if z_ndc_pix >= GL._zbuf[y, x]:
+                            continue  # falhou no z-test (menor = mais perto)
+
+                        # cor
+                        if has_color:
+                            r = (w0n*c0p[0] + w1n*c1p[0] + w2n*c2p[0]) / invw_pix
+                            g = (w0n*c0p[1] + w1n*c1p[1] + w2n*c2p[1]) / invw_pix
+                            b = (w0n*c0p[2] + w1n*c1p[2] + w2n*c2p[2]) / invw_pix
+                            col_pix = [int(max(0, min(255, round(r)))),
+                                       int(max(0, min(255, round(g)))),
+                                       int(max(0, min(255, round(b))))]
+                        else:
+                            col_pix = base[:]
+
+                        # textura (se houver), com correção por perspectiva
+                        if has_uv:
+                            u = (w0n*u0p + w1n*u1p + w2n*u2p) / invw_pix
+                            v = (w0n*v0p + w1n*v1p + w2n*v2p) / invw_pix
+                            tex = sample_tex(v, u)   # <- swap corrige rotação de 90°
+                            if tex is not None:
+                                tr, tg, tb, ta = tex
+                                # blend da textura sobre a cor interpolada
+                                a = (ta / 255.0) * mat_alpha
+                                inva = 1.0 - a
+                                col_pix = [int(tr*a + col_pix[0]*inva),
+                                           int(tg*a + col_pix[1]*inva),
+                                           int(tb*a + col_pix[2]*inva)]
+                        else:
+                            # sem textura, aplica só alpha do material
+                            if mat_alpha < 1.0:
+                                bg = gpu.GPU.read_pixel([x, y], gpu.GPU.RGB8)
+                                a = mat_alpha
+                                inva = 1.0 - a
+                                col_pix = [int(col_pix[0]*a + bg[0]*inva),
+                                           int(col_pix[1]*a + bg[1]*inva),
+                                           int(col_pix[2]*a + bg[2]*inva)]
+
+                        # escreve (passou no z-test)
+                        gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, col_pix)
+                        GL._zbuf[y, x] = z_ndc_pix
+
+        # --------- Triangulação em fan + montagem de atributos (cor/UV) ---------
         face = []
+        face_uv = []
+        ci = 0   # cursor em coordIndex
+        ti = 0   # cursor em texCoordIndex
+
+        def fetch_uv(idx):
+            if texCoord is None or idx is None or idx < 0:
+                return None
+            j = 2*idx
+            if j+1 >= len(texCoord):
+                return None
+            return [float(texCoord[j]), float(texCoord[j+1])]
+
+        def vertex_color(idx):
+            # colorPerVertex: cores em 'color' / 'colorIndex' (0..1) → 0..255
+            if colorPerVertex and color is not None:
+                if colorIndex and idx < len(colorIndex) and colorIndex[idx] >= 0:
+                    k = 3*colorIndex[idx]
+                else:
+                    k = 3*idx
+                if k+2 < len(color):
+                    return [int(max(0,min(255,round(color[k]*255)))),
+                            int(max(0,min(255,round(color[k+1]*255)))),
+                            int(max(0,min(255,round(color[k+2]*255))))]
+            return None  # sem cor por vértice
+
+        # percorre os polígonos de coordIndex (separados por -1) e texCoordIndex em paralelo
+        ptr_tc = 0
         for idx in coordIndex + [-1]:
             if idx == -1:
                 if len(face) >= 3:
-                    v0 = face[0]
                     for j in range(1, len(face)-1):
-                        v1, v2 = face[j], face[j+1]
-                        p0, _ = to_screen_idx(v0)
-                        p1, _ = to_screen_idx(v1)
-                        p2, _ = to_screen_idx(v2)
+                        i0, i1, i2 = face[0], face[j], face[j+1]
+                        p0 = proj_to_screen(i0)
+                        p1 = proj_to_screen(i1)
+                        p2 = proj_to_screen(i2)
                         if not (p0 and p1 and p2):
                             continue
 
-                        if colorPerVertex and color and colorIndex:
-                            # pega cor por vértice (em 0..1 → 0..255)
-                            def col_of_vertex(ci):
-                                # usa o índice correspondente; se faltar, usa emissive
-                                if ci < len(colorIndex) and colorIndex[ci] >= 0:
-                                    k = colorIndex[ci]*3
-                                    rgb = [color[k]*255, color[k+1]*255, color[k+2]*255]
-                                    return [int(max(0,min(255,round(v)))) for v in rgb]
-                                return solid
-                            c0 = col_of_vertex(v0)
-                            c1 = col_of_vertex(v1)
-                            c2 = col_of_vertex(v2)
-                            fill_triangle_color(p0, p1, p2, c0, c1, c2)
-                        else:
-                            # cor sólida
-                            GL._fill_triangle_simple(p0[0], p0[1], p1[0], p1[1], p2[0], p2[1], solid)
+                        c0 = vertex_color(i0)
+                        c1 = vertex_color(i1)
+                        c2 = vertex_color(i2)
+
+                        uv0 = uv1 = uv2 = None
+                        if texCoord is not None:
+                            # usa texCoordIndex quando disponível (mesma fatiada do polígono)
+                            if texCoordIndex and len(face_uv) == len(face):
+                                uv0 = fetch_uv(face_uv[0])
+                                uv1 = fetch_uv(face_uv[j])
+                                uv2 = fetch_uv(face_uv[j+1])
+                            else:
+                                # fallback: usa o mesmo índice de posição
+                                uv0 = fetch_uv(i0)
+                                uv1 = fetch_uv(i1)
+                                uv2 = fetch_uv(i2)
+
+
+
+                        raster_tri(p0, p1, p2, c0, c1, c2, uv0, uv1, uv2)
+
+                # reseta polígono atual
                 face = []
+                face_uv = []
+                # avança o ponteiro de texCoordIndex para o próximo polígono
+                if texCoordIndex:
+                    # pula exatamente o tamanho deste polígono + o -1
+                    # (como não guardamos, apenas avançamos até o próximo -1)
+                    while ptr_tc < len(texCoordIndex) and texCoordIndex[ptr_tc] != -1:
+                        ptr_tc += 1
+                    if ptr_tc < len(texCoordIndex) and texCoordIndex[ptr_tc] == -1:
+                        ptr_tc += 1
             else:
                 face.append(idx)
+                # guarda o índice de texCoord correspondente a este vértice do polígono
+                if texCoordIndex and ptr_tc < len(texCoordIndex):
+                    face_uv.append(texCoordIndex[ptr_tc] if texCoordIndex[ptr_tc] != -1 else None)
+                    ptr_tc += 1
+                else:
+                    face_uv.append(None)
+
+
 
     @staticmethod
     def box(size, colors):
@@ -788,6 +972,200 @@ class GL:
 
     def fragment_shader(self, shader):
         """Para no futuro implementar um fragment shader."""
+    
+     # [ADICIONADO] ---------- Buffers de software (Z) ----------
+    @staticmethod
+    def _alloc_software_buffers():
+        """Aloca z-buffer de software para a resolução atual (GL.width x GL.height)."""
+        GL._zbuf = np.full((GL.height, GL.width), np.inf, dtype=float)
+
+    @staticmethod
+    def _clear_software_buffers():
+        """Limpa z-buffer de software para +inf (chamar a cada frame)."""
+        if hasattr(GL, "_zbuf"):
+            GL._zbuf.fill(np.inf)
+
+    # [ADICIONADO] ---------- Projeção com info de 1/w e z_ndc ----------
+    @staticmethod
+    def _project_vertex(v3):
+        M = getattr(GL, "_M", np.eye(4))
+        V = getattr(GL, "_V", np.eye(4))
+        P = getattr(GL, "_P", np.eye(4))
+        PVM = P @ V @ M
+        v = np.array([v3[0], v3[1], v3[2], 1.0], dtype=float)
+        clip = PVM @ v
+        if clip[3] == 0:
+            return None
+        invw = 1.0 / clip[3]
+        ndc = clip[:3] * invw  # [-1,1]
+        sx = (ndc[0] + 1.0) * 0.5 * (GL.width - 1)
+        sy = (1.0 - (ndc[1] + 1.0) * 0.5) * (GL.height - 1)
+        return {"sx": sx, "sy": sy, "z_ndc": ndc[2], "invw": invw}
+
+    # [ADICIONADO] ---------- Geometria 2D ----------
+    @staticmethod
+    def _edge(a, b, p):
+        return (p[0]-a[0])*(b[1]-a[1]) - (p[1]-a[1])*(b[0]-a[0])
+
+    # [ADICIONADO] ---------- Blend (src over dst) ----------
+    @staticmethod
+    def _blend_over(dst_rgb, src_rgb, alpha):
+        # todos em 0..255 float, alpha em 0..1
+        return src_rgb * alpha + dst_rgb * (1.0 - alpha)
+
+    # [ADICIONADO] ---------- Textura + Mipmap ----------
+    _tex_cache = {}
+
+    @staticmethod
+    def _get_texture(tex_path):
+        if tex_path in GL._tex_cache:
+            return GL._tex_cache[tex_path]
+        img = gpu.GPU.load_texture(tex_path)  # numpy HxWxC (uint8)
+        levels = [img]
+        cur = img
+        while min(cur.shape[0], cur.shape[1]) > 1:
+            h2 = max(1, cur.shape[0] // 2)
+            w2 = max(1, cur.shape[1] // 2)
+            cur = cur[:h2*2, :w2*2].reshape(h2, 2, w2, 2, cur.shape[2]).mean(axis=(1,3)).astype(np.uint8)
+            levels.append(cur)
+        tex = {"levels": levels}
+        GL._tex_cache[tex_path] = tex
+        return tex
+
+    @staticmethod
+    def _sample_tex_level(level_img, u, v):
+        # u,v em [0,1]; v invertido (origem topo)
+        H, W, C = level_img.shape
+        uu = np.clip(u, 0.0, 1.0) * (W - 1)
+        vv = (1.0 - np.clip(v, 0.0, 1.0)) * (H - 1)
+        x0 = int(np.floor(uu)); x1 = min(W - 1, x0 + 1)
+        y0 = int(np.floor(vv)); y1 = min(H - 1, y0 + 1)
+        tx = uu - x0; ty = vv - y0
+        c00 = level_img[y0, x0].astype(float)
+        c10 = level_img[y0, x1].astype(float)
+        c01 = level_img[y1, x0].astype(float)
+        c11 = level_img[y1, x1].astype(float)
+        c0 = c00 * (1 - tx) + c10 * tx
+        c1 = c01 * (1 - tx) + c11 * tx
+        return c0 * (1 - ty) + c1 * ty  # 3 ou 4 canais
+
+    @staticmethod
+    def _estimate_mip_level(tex, tri_uv_area, tri_screen_area):
+        levels = tex["levels"]
+        if tri_uv_area is None or tri_uv_area <= 0 or tri_screen_area <= 0:
+            return 0
+        base = levels[0]
+        H, W = base.shape[:2]
+        area_texels = tri_uv_area * (W * H)
+        s = max(1e-6, np.sqrt(area_texels / max(1.0, tri_screen_area)))
+        L = int(np.clip(np.log2(s), 0, len(levels) - 1))
+        return L
+
+    # [ADICIONADO] ---------- Raster com interp persp, Z-buffer, transparência e textura ----------
+    @staticmethod
+    def _raster_triangle_persp(p0, p1, p2, a0, a1, a2, material, tex=None, tri_uv_area=None):
+        # material
+                # base do material: preferir diffuseColor; se não tiver, usar emissiveColor; se nada vier, branco
+        diff = material.get('diffuseColor', None) if isinstance(material, dict) else None
+        emis = material.get('emissiveColor', None) if isinstance(material, dict) else None
+        if diff is not None:
+            base_rgb = np.array([diff[0]*255.0, diff[1]*255.0, diff[2]*255.0], dtype=float)
+        elif emis is not None:
+            base_rgb = np.array([emis[0]*255.0, emis[1]*255.0, emis[2]*255.0], dtype=float)
+        else:
+            base_rgb = np.array([255.0, 255.0, 255.0], dtype=float)  # não apaga textura por engano
+        alpha_mat = 1.0 - float(material.get('transparency', 0.0)) if isinstance(material, dict) else 1.0
+
+
+        # bounding box
+        minx = int(max(0, np.floor(min(p0["sx"], p1["sx"], p2["sx"]))))
+        maxx = int(min(GL.width - 1, np.ceil (max(p0["sx"], p1["sx"], p2["sx"]))))
+        miny = int(max(0, np.floor(min(p0["sy"], p1["sy"], p2["sy"]))))
+        maxy = int(min(GL.height - 1, np.ceil (max(p0["sy"], p1["sy"], p2["sy"]))))
+
+        A = GL._edge((p0["sx"], p0["sy"]), (p1["sx"], p1["sy"]), (p2["sx"], p2["sy"]))
+        if A == 0:
+            return
+        tri_screen_area = abs(A)
+
+        level_img = None
+        if tex is not None:
+            L = GL._estimate_mip_level(tex, tri_uv_area, tri_screen_area)
+            level_img = tex["levels"][L]
+
+        w0 = p0["invw"]; w1 = p1["invw"]; w2 = p2["invw"]
+        z0 = p0["z_ndc"]; z1 = p1["z_ndc"]; z2 = p2["z_ndc"]
+
+        for y in range(miny, maxy + 1):
+            for x in range(minx, maxx + 1):
+                Px = x + 0.5; Py = y + 0.5
+                e0 = GL._edge((p1["sx"], p1["sy"]), (p2["sx"], p2["sy"]), (Px, Py))
+                e1 = GL._edge((p2["sx"], p2["sy"]), (p0["sx"], p0["sy"]), (Px, Py))
+                e2 = GL._edge((p0["sx"], p0["sy"]), (p1["sx"], p1["sy"]), (Px, Py))
+                inside = ((A > 0 and e0 >= 0 and e1 >= 0 and e2 >= 0) or
+                          (A < 0 and e0 <= 0 and e1 <= 0 and e2 <= 0))
+                if not inside:
+                    continue
+
+                l0 = e0 / A; l1 = e1 / A; l2 = e2 / A
+                denom = l0*w0 + l1*w1 + l2*w2
+                if denom == 0:
+                    continue
+
+                z_ndc = (l0*z0*w0 + l1*z1*w1 + l2*z2*w2) / denom
+                z01 = 0.5 * z_ndc + 0.5
+
+                # depth test (software)
+                zcur = GL._zbuf[y, x]
+
+                               # base: cor por vértice (se existir) SENÃO a cor do material (diffuse/emissive/branco)
+                if a0.get("rgb") is not None:
+                    cr = (l0*a0["rgb"][0]*w0 + l1*a1["rgb"][0]*w1 + l2*a2["rgb"][0]*w2)/denom
+                    cg = (l0*a0["rgb"][1]*w0 + l1*a1["rgb"][1]*w1 + l2*a2["rgb"][1]*w2)/denom
+                    cb = (l0*a0["rgb"][2]*w0 + l1*a1["rgb"][2]*w1 + l2*a2["rgb"][2]*w2)/denom
+                    rgb_base = np.array([cr, cg, cb], dtype=float)
+                else:
+                    rgb_base = base_rgb.copy()
+
+                rgb = rgb_base.copy()
+
+                # textura (se houver)
+                alpha_tex = 1.0
+                if level_img is not None and a0.get("uv") is not None:
+                    u = (l0*a0["uv"][0]*w0 + l1*a1["uv"][0]*w1 + l2*a2["uv"][0]*w2) / denom
+                    v = (l0*a0["uv"][1]*w0 + l1*a1["uv"][1]*w1 + l2*a2["uv"][1]*w2) / denom
+                    texel = GL._sample_tex_level(level_img, u, v)  # [ADICIONADO] corrige rotação 90° (swap u<->v)
+
+
+                    if texel.shape[0] >= 3:
+                        # MODULA a textura pela base (diffuse/vertex). Se base for branca, fica a textura “pura”.
+                        rgb = rgb_base * (texel[:3] / 255.0)
+
+                    if texel.shape[0] == 4:
+                        alpha_tex = float(texel[3]) / 255.0
+
+
+                alpha = float(np.clip(alpha_mat * alpha_tex, 0.0, 1.0))
+
+                # OPAQUE: escreve cor e z se mais perto
+                if alpha >= 0.999:
+                    if z01 < zcur:
+                        gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8,
+                                           [int(np.clip(rgb[0],0,255)),
+                                            int(np.clip(rgb[1],0,255)),
+                                            int(np.clip(rgb[2],0,255))])
+                        GL._zbuf[y, x] = z01
+                    continue
+
+                # TRANSPARENTE: depth test, não escreve z, faz blend over
+                if z01 < zcur:
+                    dst = np.array(gpu.GPU.read_pixel([x, y], gpu.GPU.RGB8), dtype=float)
+                    out = GL._blend_over(dst, np.clip(rgb,0,255), alpha)
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8,
+                                       [int(np.clip(out[0],0,255)),
+                                        int(np.clip(out[1],0,255)),
+                                        int(np.clip(out[2],0,255))])
+                    
 
     # Funções auxiliares simples para rasterização
     @staticmethod

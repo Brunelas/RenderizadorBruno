@@ -40,11 +40,17 @@ class Renderizador:
         """Configura o sistema para a renderização."""
         # Configurando color buffers para exibição na tela
 
-        # Cria uma (1) posição de FrameBuffer na GPU
-        fbo = gpu.GPU.gen_framebuffers(1)
+        # ADICIONADO: fator de supersampling (2x2)
+        self.ssaa = 2  # pode deixar fixo em 2 (enunciado pede 2x2 por padrão)
+
+        # Cria uma (2) posição de FrameBuffer na GPU
+        fbo = gpu.GPU.gen_framebuffers(2) # ADICIONADO: pedir 2 FBOs (um para tela, outro para SSAA)
 
         # Define o atributo FRONT como o FrameBuffe principal
         self.framebuffers["FRONT"] = fbo[0]
+
+        # ADICIONADO: framebuffer “SSAA” onde realmente vamos rasterizar em resolução maior
+        self.framebuffers["SSAA"] = fbo[1]
 
         # Define que a posição criada será usada para desenho e leitura
         gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["FRONT"])
@@ -65,13 +71,31 @@ class Renderizador:
         )
 
         # Descomente as seguintes linhas se for usar um Framebuffer para profundidade
-        # gpu.GPU.framebuffer_storage(
-        #     self.framebuffers["FRONT"],
-        #     gpu.GPU.DEPTH_ATTACHMENT,
-        #     gpu.GPU.DEPTH_COMPONENT32F,
-        #     self.width,
-        #     self.height
-        # )
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["FRONT"],
+            gpu.GPU.DEPTH_ATTACHMENT,
+            gpu.GPU.DEPTH_COMPONENT32F,
+            self.width,
+            self.height
+        )
+
+        # ADICIONADO: aloca o framebuffer “SSAA” com 2x a resolução na cor e na profundidade
+        ss_w, ss_h = self.width * self.ssaa, self.height * self.ssaa
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SSAA"])
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["SSAA"],
+            gpu.GPU.COLOR_ATTACHMENT,
+            gpu.GPU.RGB8,
+            ss_w,
+            ss_h
+        )
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["SSAA"],
+            gpu.GPU.DEPTH_ATTACHMENT,
+            gpu.GPU.DEPTH_COMPONENT32F,
+            ss_w,
+            ss_h
+        )
     
         # Opções:
         # - COLOR_ATTACHMENT: alocações para as cores da imagem renderizada
@@ -91,8 +115,24 @@ class Renderizador:
         # Assuma 1.0 o mais afastado e -1.0 o mais próximo da camera
         gpu.GPU.clear_depth(1.0)
 
+        # ADICIONADO: vamos desenhar no SSAA (alta resolução)
+        #             bind para leitura+escrita no FBO SSAA
+        gpu.GPU.bind_framebuffer(gpu.GPU.FRAMEBUFFER, self.framebuffers["SSAA"])
+
         # Definindo tamanho do Viewport para renderização
-        self.scene.viewport(width=self.width, height=self.height)
+        #self.scene.viewport(width=self.width, height=self.height)
+
+        # ADICIONADO: ajustar viewport e GL para a resolução SSAA
+        self.scene.viewport(width=ss_w, height=ss_h)
+        # o GL usa width/height para mapear NDC->tela; atualizamos para ssaa
+        import gl
+        gl.GL.width = ss_w
+        gl.GL.height = ss_h
+
+        gl.GL._alloc_software_buffers()  # [ADICIONADO] aloca z-buffer de software na resolução SSAA
+        
+
+
 
     def pre(self):
         """Rotinas pré renderização."""
@@ -101,6 +141,10 @@ class Renderizador:
         # Limpa o frame buffers atual
         gpu.GPU.clear_buffer()
 
+        gl.GL._clear_software_buffers()  # [ADICIONADO] z-buffer de software volta para +inf
+
+        if hasattr(gl.GL, "_zbuf"):
+            gl.GL._zbuf.fill(1.0)  # 1.0 = mais longe (compatível com NDC)
         # Recursos que podem ser úteis:
         # Define o valor do pixel no framebuffer: draw_pixel(coord, mode, data)
         # Retorna o valor do pixel no framebuffer: read_pixel(coord, mode)
@@ -112,6 +156,33 @@ class Renderizador:
         # Essa é uma chamada conveniente para manipulação de buffers
         # ao final da renderização de um frame. Como por exemplo, executar
         # downscaling da imagem.
+
+        # ADICIONADO: downscale 2x2 do SSAA -> FRONT
+        if hasattr(self, "ssaa") and self.ssaa == 2 and "SSAA" in self.framebuffers:
+            w, h = self.width, self.height
+            ss_w, ss_h = w * 2, h * 2
+
+            # Bind leitura no SSAA e escrita no FRONT
+            gpu.GPU.bind_framebuffer(gpu.GPU.READ_FRAMEBUFFER, self.framebuffers["SSAA"])
+            gpu.GPU.bind_framebuffer(gpu.GPU.DRAW_FRAMEBUFFER, self.framebuffers["FRONT"])
+
+            # varre cada pixel de saída (w x h) e faz média de um bloco 2x2 do SSAA
+            for y in range(h):
+                sy = 2 * y
+                for x in range(w):
+                    sx = 2 * x
+                    # lê 4 amostras do SSAA
+                    c00 = gpu.GPU.read_pixel([sx,     sy    ], gpu.GPU.RGB8)
+                    c10 = gpu.GPU.read_pixel([sx + 1, sy    ], gpu.GPU.RGB8)
+                    c01 = gpu.GPU.read_pixel([sx,     sy + 1], gpu.GPU.RGB8)
+                    c11 = gpu.GPU.read_pixel([sx + 1, sy + 1], gpu.GPU.RGB8)
+                    # média simples (box filter 2x2)
+                    r = (c00[0] + c10[0] + c01[0] + c11[0]) // 4
+                    g = (c00[1] + c10[1] + c01[1] + c11[1]) // 4
+                    b = (c00[2] + c10[2] + c01[2] + c11[2]) // 4
+                    gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, [int(r), int(g), int(b)])
+
+        # (opcional) se quiser limpar o SSAA depois, pode fazê-lo aqui.
 
         # Método para a troca dos buffers (NÃO IMPLEMENTADO)
         # Esse método será utilizado na fase de implementação de animações
